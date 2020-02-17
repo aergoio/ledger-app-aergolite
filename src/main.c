@@ -43,6 +43,7 @@ static char lineBuffer[50];
 static unsigned int  len_to_display;
 static unsigned int  current_text_pos; // parsing cursor in the text to display
 static unsigned char isFirstPart;      // if this is the first part of a message
+static unsigned char is_last_text_part;
 static unsigned char last_part_displayed;
 
 static cx_sha256_t hash;
@@ -72,7 +73,6 @@ static void ui_approval(void);
 static void request_next_part();
 static void on_new_transaction_part(unsigned char *text, unsigned int len);
 static void display_text_part(void);
-static unsigned char is_last_text_part(void);
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -216,7 +216,7 @@ bagl_ui_text_review_nanos_button(unsigned int button_mask,
                                  unsigned int button_mask_counter) {
     switch (button_mask) {
     case BUTTON_EVT_RELEASED | BUTTON_RIGHT:
-        if (is_last_text_part()) {
+        if (is_last_text_part) {
             ui_approval();
         } else {
             request_next_part();
@@ -344,6 +344,9 @@ static void sample_main(void) {
                     if (len > 250) {
                         THROW(0x6700);  //917E
                     }
+                    if (G_io_apdu_buffer[2] == P1_MORE && len < 50) {
+                        THROW(0x6700);  //917E
+                    }
                     // check for nulls in the middle of the message
                     text = G_io_apdu_buffer + 5;
                     for (i=0; i<len; i++) {
@@ -416,12 +419,14 @@ static unsigned char * stripchr(unsigned char *mainstr, int separator) {
 static void on_new_transaction_part(unsigned char *text, unsigned int len) {
     unsigned int i, dest;
 
+    is_last_text_part = (G_io_apdu_buffer[2] == P1_LAST);
+
     if (uiState == UI_IDLE || last_part_displayed) {
         isFirstPart = 1;
     } else {
         isFirstPart = 0;
     }
-    last_part_displayed = is_last_text_part();
+    last_part_displayed = is_last_text_part;
 
     if (isFirstPart) {
         cx_sha256_init(&hash);
@@ -451,7 +456,7 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
 
 #if 0
     // do not show trailing line breaks
-    if (is_last_text_part()) {
+    if (is_last_text_part) {
         for (i=len-1; i>=0; i--) {
             WIDE char c = text[i];
             if (c == '\n' || c == '\r') {
@@ -485,13 +490,6 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
         UX_REDISPLAY();
     }
 
-}
-
-static unsigned char is_last_text_part() {
-    if (G_io_apdu_buffer[2] == P1_LAST) {
-        return 1;
-    }
-    return 0;
 }
 
 static unsigned char text_part_completely_displayed() {
@@ -552,7 +550,7 @@ unsigned char io_event(unsigned char channel) {
             if (uiState == UI_TEXT) {
               if (isFirstPart && current_text_pos <= 1) {
                 UX_CALLBACK_SET_INTERVAL(2000);
-              } else if (text_part_completely_displayed() && is_last_text_part()) {
+              } else if (text_part_completely_displayed() && is_last_text_part) {
                 UX_CALLBACK_SET_INTERVAL(2000);
               } else {
                 UX_CALLBACK_SET_INTERVAL(200);
@@ -568,7 +566,7 @@ unsigned char io_event(unsigned char channel) {
           //if (UX_ALLOWED) {
             if (uiState == UI_TEXT) {
                 if (text_part_completely_displayed()) {
-                    //if (is_last_text_part()) {
+                    //if (is_last_text_part) {
                     //    ui_approval();
                     //} else {
                         request_next_part();
