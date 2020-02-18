@@ -20,6 +20,7 @@
 #include "ux.h"
 
 #include <string.h>
+#include <stdbool.h>
 
 #define CLA 0x80
 #define INS_SIGN 0x02
@@ -50,15 +51,13 @@ static cx_sha256_t hash;
 
 // UI currently displayed
 enum UI_STATE { UI_IDLE, UI_TEXT, UI_APPROVAL };
-
 enum UI_STATE uiState;
 
 ux_state_t ux;
 
-// private key in flash. const and N_ variable name are mandatory here
-static const cx_ecfp_private_key_t N_privateKey;
-// initialization marker in flash. const and N_ variable name are mandatory here
-static const unsigned char N_initialized;
+// private and public keys
+cx_ecfp_private_key_t privateKey;
+cx_ecfp_public_key_t  publicKey;
 
 // functions declarations
 
@@ -242,9 +241,10 @@ static const bagl_element_t *io_seproxyhal_touch_approve(const bagl_element_t *e
 
     // Hash is finalized, send back the signature
     unsigned char result[32];
-    cx_hash(&hash.header, CX_LAST, G_io_apdu_buffer, 0, result);
-    tx = cx_ecdsa_sign((void*) &N_privateKey, CX_RND_RFC6979 | CX_LAST,
-                       CX_SHA256, result, sizeof(result), G_io_apdu_buffer, NULL);
+    cx_hash(&hash.header, CX_LAST, G_io_apdu_buffer, 0, result, sizeof result);
+    tx = cx_ecdsa_sign((void*) &privateKey, CX_RND_RFC6979 | CX_LAST, CX_SHA256,
+                       result, sizeof result,
+                       G_io_apdu_buffer, sizeof G_io_apdu_buffer, NULL);
     G_io_apdu_buffer[0] &= 0xF0; // discard the parity information
 
     G_io_apdu_buffer[tx++] = 0x90;
@@ -360,10 +360,6 @@ static void sample_main(void) {
                 } break;
 
                 case INS_GET_PUBLIC_KEY: {
-                    cx_ecfp_public_key_t publicKey;
-                    cx_ecfp_private_key_t privateKey;
-                    os_memmove(&privateKey, &N_privateKey, sizeof(cx_ecfp_private_key_t));
-                    cx_ecfp_generate_pair(CX_CURVE_256K1, &publicKey, &privateKey, 1);
                     os_memmove(G_io_apdu_buffer, publicKey.W, 65);
                     tx = 65;
                     THROW(0x9000);
@@ -432,7 +428,7 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
         cx_sha256_init(&hash);
     }
     // Update the hash with this part
-    cx_hash(&hash.header, 0, text, len, NULL);
+    cx_hash(&hash.header, 0, text, len, NULL, 0);
 
     if (isFirstPart) {
         dest = 0;
@@ -595,6 +591,28 @@ unsigned char io_event(unsigned char channel) {
     return 1;
 }
 
+static bool derive_keys() {
+    unsigned int  path[5];
+    unsigned char privateKeyData[64];
+
+    // m / purpose' / coin_type' / account' / change / address_index
+    // m / 44'      / 511'       / 0'       / 0      / 0
+    path[0] = 0x8000002C;
+    path[1] = 0x800001ff;
+    path[2] = 0x80000000;
+    path[3] = 0x00000000;
+    path[4] = 0x00000000;
+
+    io_seproxyhal_io_heartbeat();
+    os_perso_derive_node_bip32(CX_CURVE_256K1, path, 5, privateKeyData, NULL);
+    cx_ecdsa_init_private_key(CX_CURVE_256K1, privateKeyData, 32, &privateKey);
+    io_seproxyhal_io_heartbeat();
+    cx_ecfp_generate_pair(CX_CURVE_256K1, &publicKey, &privateKey, 1);
+
+    memset(privateKeyData, 0, sizeof privateKeyData);
+    return true;
+}
+
 __attribute__((section(".boot"))) int main(void) {
     // exit critical section
     __asm volatile("cpsie i");
@@ -611,17 +629,6 @@ __attribute__((section(".boot"))) int main(void) {
         TRY {
             io_seproxyhal_init();
 
-            // Create the private key if not initialized
-            if (N_initialized != 0x01) {
-                unsigned char canary;
-                cx_ecfp_private_key_t privateKey;
-                cx_ecfp_public_key_t publicKey;
-                cx_ecfp_generate_pair(CX_CURVE_256K1, &publicKey, &privateKey, 0);
-                nvm_write((void*) &N_privateKey, &privateKey, sizeof(privateKey));
-                canary = 0x01;
-                nvm_write((void*) &N_initialized, &canary, sizeof(canary));
-            }
-
 #ifdef LISTEN_BLE
             if (os_seph_features() & SEPROXYHAL_TAG_SESSION_START_EVENT_FEATURE_BLE) {
                 BLE_power(0, NULL);
@@ -632,6 +639,8 @@ __attribute__((section(".boot"))) int main(void) {
 
             USB_power(0);
             USB_power(1);
+
+            derive_keys();
 
             ui_idle();
 
