@@ -19,12 +19,11 @@ Only Linux is supported to build the Ledger app so if you do not have one you ca
 
 Please follow the Getting Started instructions at [here](https://ledger.readthedocs.io/en/latest/userspace/getting_started.html).
 
-If you don't want to setup a global environnment, you can also setup one just for this app by sourcing `prepare-devenv.sh` with the right target (s or x):
+If you don't want to setup a global environnment, you can also setup one just for this app by sourcing `prepare-devenv.sh`:
 
 ```
 sudo apt install python3-venv python3-dev libudev-dev libusb-1.0-0-dev
-# (s or x, depending on your device)
-source prepare-devenv.sh s
+source prepare-devenv.sh
 ```
 
 
