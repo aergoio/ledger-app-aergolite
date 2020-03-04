@@ -2,7 +2,7 @@
 
 AergoLite signing application for Ledger Nano S
 
-![ledger-app-aergolite](https://user-images.githubusercontent.com/7624275/73798570-ec639280-4791-11ea-8a1f-7cb3ea836ec8.jpg)
+![ledger-app-aergolite](https://user-images.githubusercontent.com/7624275/75843449-f4731a00-5db1-11ea-8c13-d401041e3baa.jpg)
 
 This application can be used by the blockchain administrator to sign its transactions:
 
