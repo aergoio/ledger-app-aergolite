@@ -13,25 +13,24 @@ This application can be used by the blockchain administrator to sign its transac
 
 ## Requirements
 
-To build and install the app on your Ledger Nano S you must set up the Ledger Nano S build environments. 
+To build and install the app on your Ledger Nano S you must set up the Ledger Nano S build environments.
 
 Only Linux is supported to build the Ledger app so if you do not have one you can use a VM.
 
-Please follow the Getting Started instructions at [here](https://ledger.readthedocs.io/en/latest/userspace/getting_started.html).
-
-If you don't want to setup a global environnment, you can also setup one just for this app by sourcing `prepare-devenv.sh`:
-
-```
-sudo apt install python3-venv python3-dev libudev-dev libusb-1.0-0-dev
-source prepare-devenv.sh
-```
-
-
-You must also set up the udev rules for the Ledger devices. Execute this on a Linux terminal:
+First set up the udev rules for the Ledger devices by executing this on a Linux terminal:
 
 ```
 wget -q -O - https://raw.githubusercontent.com/LedgerHQ/udev-rules/master/add_udev_rules.sh | sudo bash
 ```
+
+Then install the requirements in a virtual environnment by sourcing `prepare-devenv.sh`:
+
+```
+sudo apt install gcc-multilib g++-multilib python3-venv python3-dev libudev-dev libusb-1.0-0-dev
+source prepare-devenv.sh
+```
+
+You can optionally follow the [Getting Started](https://ledger.readthedocs.io/en/latest/userspace/getting_started.html) instructions from Ledger.
 
 
 ## Installation
