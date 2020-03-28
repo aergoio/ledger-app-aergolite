@@ -5,6 +5,9 @@
 #include <string.h>
 #include <stdbool.h>
 
+#define APP_VERSION_MAJOR   1
+#define APP_VERSION_MINOR   0
+
 #define CLA     0xE7
 #define INS_GET_APP_VERSION 0x01
 #define INS_GET_PUBLIC_KEY  0x02
@@ -316,6 +319,19 @@ static void sample_main(void) {
                 }
 
                 switch (G_io_apdu_buffer[1]) {
+                case INS_GET_APP_VERSION: {
+                    G_io_apdu_buffer[0] = APP_VERSION_MAJOR;
+                    G_io_apdu_buffer[1] = APP_VERSION_MINOR;
+                    tx = 2;
+                    THROW(0x9000);
+                } break;
+
+                case INS_GET_PUBLIC_KEY: {
+                    os_memmove(G_io_apdu_buffer, publicKey.W, 65);
+                    tx = 65;
+                    THROW(0x9000);
+                } break;
+
                 case INS_SIGN_TXN: {
                     unsigned char *text;
                     unsigned int len, i;
@@ -326,27 +342,21 @@ static void sample_main(void) {
                     // check the message length
                     len = G_io_apdu_buffer[4];
                     if (len > 250) {
-                        THROW(0x6700);  //917E
+                        THROW(0x6700);  // wrong length
                     }
                     if (G_io_apdu_buffer[2] == P1_MORE && len < 50) {
-                        THROW(0x6700);  //917E
+                        THROW(0x6700);  // wrong length
                     }
                     // check for nulls in the middle of the message
                     text = G_io_apdu_buffer + 5;
                     for (i=0; i<len; i++) {
                       if (text[i] == '\0') {
-                        THROW(0x6984);
+                        THROW(0x6984);  // invalid data
                       }
                     }
                     text[len] = '\0';
                     on_new_transaction_part(text, len);
                     flags |= IO_ASYNCH_REPLY;
-                } break;
-
-                case INS_GET_PUBLIC_KEY: {
-                    os_memmove(G_io_apdu_buffer, publicKey.W, 65);
-                    tx = 65;
-                    THROW(0x9000);
                 } break;
 
                 case 0xFF: // return to dashboard
