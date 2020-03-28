@@ -1,20 +1,3 @@
-/*******************************************************************************
-*   Ledger Blue
-*   (c) 2016 Ledger
-*
-*  Licensed under the Apache License, Version 2.0 (the "License");
-*  you may not use this file except in compliance with the License.
-*  You may obtain a copy of the License at
-*
-*      http://www.apache.org/licenses/LICENSE-2.0
-*
-*  Unless required by applicable law or agreed to in writing, software
-*  distributed under the License is distributed on an "AS IS" BASIS,
-*  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-*  See the License for the specific language governing permissions and
-*  limitations under the License.
-********************************************************************************/
-
 #include "os.h"
 #include "cx.h"
 #include "ux.h"
@@ -22,13 +5,14 @@
 #include <string.h>
 #include <stdbool.h>
 
-#define CLA 0x80
-#define INS_SIGN 0x02
-#define INS_GET_PUBLIC_KEY 0x04
+#define CLA     0xE7
+#define INS_GET_APP_VERSION 0x01
+#define INS_GET_PUBLIC_KEY  0x02
+#define INS_SIGN_TXN        0x04
 #define P1_LAST 0x80
 #define P1_MORE 0x00
 
-#define MAX_CHARS_PER_LINE 15
+#define MAX_CHARS_PER_LINE 13  // some strings do not appear entirely on the screen if bigger than this
 
 unsigned char G_io_seproxyhal_spi_buffer[IO_SEPROXYHAL_BUFFER_SIZE_B];
 
@@ -42,8 +26,8 @@ static unsigned char *datetime;
 static char lineBuffer[50];
 
 static unsigned int  len_to_display;
-static unsigned int  current_text_pos; // parsing cursor in the text to display
-static unsigned char isFirstPart;      // if this is the first part of a message
+static unsigned int  current_text_pos;   // parsing cursor in the text to display
+static unsigned char is_first_text_part; // if this is the first part of a message
 static unsigned char is_last_text_part;
 static unsigned char last_part_displayed;
 
@@ -241,7 +225,7 @@ static const bagl_element_t *io_seproxyhal_touch_approve(const bagl_element_t *e
 
     // Hash is finalized, send back the signature
     unsigned char result[32];
-    cx_hash(&hash.header, CX_LAST, G_io_apdu_buffer, 0, result, sizeof result);
+    cx_hash(&hash.header, CX_LAST, NULL, 0, result, sizeof result);
     tx = cx_ecdsa_sign((void*) &privateKey, CX_RND_RFC6979 | CX_LAST, CX_SHA256,
                        result, sizeof result,
                        G_io_apdu_buffer, sizeof G_io_apdu_buffer, NULL);
@@ -332,7 +316,7 @@ static void sample_main(void) {
                 }
 
                 switch (G_io_apdu_buffer[1]) {
-                case INS_SIGN: {
+                case INS_SIGN_TXN: {
                     unsigned char *text;
                     unsigned int len, i;
                     if ((G_io_apdu_buffer[2] != P1_MORE) &&
@@ -418,26 +402,26 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
     is_last_text_part = (G_io_apdu_buffer[2] == P1_LAST);
 
     if (uiState == UI_IDLE || last_part_displayed) {
-        isFirstPart = 1;
+        is_first_text_part = 1;
     } else {
-        isFirstPart = 0;
+        is_first_text_part = 0;
     }
     last_part_displayed = is_last_text_part;
 
-    if (isFirstPart) {
+    if (is_first_text_part) {
         cx_sha256_init(&hash);
     }
     // Update the hash with this part
     cx_hash(&hash.header, 0, text, len, NULL, 0);
 
-    if (isFirstPart) {
+    if (is_first_text_part) {
         dest = 0;
     } else {
         memcpy(to_display, &to_display[len_to_display-MAX_CHARS_PER_LINE+1], MAX_CHARS_PER_LINE-1);
         dest = MAX_CHARS_PER_LINE - 1;
     }
 
-    if (isFirstPart) {
+    if (is_first_text_part) {
         // parse the transaction nonce and datetime
         unsigned char *commands;
         noncestr = text;
@@ -480,7 +464,7 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
     current_text_pos = 0;
     display_text_part();
 
-    if (isFirstPart) {
+    if (is_first_text_part) {
         ui_text();
     } else {
         UX_REDISPLAY();
@@ -544,7 +528,7 @@ unsigned char io_event(unsigned char channel) {
         if (UX_DISPLAYED()) {
             // perform action after screen elements have been displayed
             if (uiState == UI_TEXT) {
-              if (isFirstPart && current_text_pos <= 1) {
+              if (is_first_text_part && current_text_pos <= 1) {
                 UX_CALLBACK_SET_INTERVAL(2000);
               } else if (text_part_completely_displayed() && is_last_text_part) {
                 UX_CALLBACK_SET_INTERVAL(2000);
@@ -559,20 +543,22 @@ unsigned char io_event(unsigned char channel) {
 
     case SEPROXYHAL_TAG_TICKER_EVENT:
         UX_TICKER_EVENT(G_io_seproxyhal_spi_buffer, {
-          //if (UX_ALLOWED) {
+          if (UX_ALLOWED) {
             if (uiState == UI_TEXT) {
                 if (text_part_completely_displayed()) {
-                    //if (is_last_text_part) {
-                    //    ui_approval();
-                    //} else {
+                    if (is_last_text_part) {
+                        // do nothing
+                    } else {
                         request_next_part();
-                    //}
+                    }
                 } else {
                     display_text_part();
                     UX_REDISPLAY();
                 }
             }
-          //}
+          } else {
+            UX_CALLBACK_SET_INTERVAL(200);
+          }
         });
         break;
 
