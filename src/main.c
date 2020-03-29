@@ -25,6 +25,8 @@ static unsigned char *datetime;
 static char line2[20];
 static char line2b[30];
 
+static bool use_scroll;
+
 static unsigned int  line2_size;
 static unsigned int  last_utf8_char;
 
@@ -61,6 +63,7 @@ static void request_next_part();
 static void on_new_transaction_part(unsigned char *text, unsigned int len);
 static bool display_text_part(void);
 static bool update_display_buffer();
+static unsigned char text_part_completely_displayed();
 
 /*
 ** This lookup table is used to help decode the first byte of
@@ -240,12 +243,28 @@ bagl_ui_text_review_nanos_button(unsigned int button_mask,
                                  unsigned int button_mask_counter) {
     switch (button_mask) {
     case BUTTON_EVT_RELEASED | BUTTON_RIGHT:
-        if (is_last_text_part) {
+        if (text_part_completely_displayed() && is_last_text_part) {
             ui_approval();
         } else {
-            line2_size = 0;
+            if (line2_size > MAX_CHARS_PER_LINE) {
+              memmove(line2b, line2b+(MAX_CHARS_PER_LINE-1), line2_size-(MAX_CHARS_PER_LINE-1));
+              line2_size -= (MAX_CHARS_PER_LINE - 1);
+            } else {
+              line2b[0] = line2b[line2_size-1];
+              line2_size = 1;
+            }
             last_utf8_char = 0;
-            request_next_part();
+            use_scroll = false;
+            if (display_text_part()) {
+                UX_REDISPLAY();
+            }
+        }
+        break;
+
+    case BUTTON_EVT_RELEASED | BUTTON_LEFT | BUTTON_RIGHT:
+        use_scroll = !use_scroll;
+        if (use_scroll) {
+            UX_CALLBACK_SET_INTERVAL(200);
         }
         break;
 
@@ -491,6 +510,7 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
     if (is_first_text_part) {
         line2_size = 0;
         last_utf8_char = 0;
+        use_scroll = true;
     }
 
     text_to_display = text;
@@ -596,7 +616,7 @@ static bool update_display_buffer() {
         }
     }
 
-    if (zIn == zEnd && !is_last_text_part) {
+    if (zIn >= zEnd && !is_last_text_part) {
       return false;
     }
     return true;
@@ -633,7 +653,7 @@ unsigned char io_event(unsigned char channel) {
     case SEPROXYHAL_TAG_DISPLAY_PROCESSED_EVENT:
         if (UX_DISPLAYED()) {
             // perform action after screen elements have been displayed
-            if (uiState == UI_TEXT) {
+            if (uiState == UI_TEXT && use_scroll) {
               if (is_first_display) {
                 UX_CALLBACK_SET_INTERVAL(2000);
               } else if (text_part_completely_displayed() && is_last_text_part) {
@@ -650,7 +670,7 @@ unsigned char io_event(unsigned char channel) {
     case SEPROXYHAL_TAG_TICKER_EVENT:
         UX_TICKER_EVENT(G_io_seproxyhal_spi_buffer, {
           if (UX_ALLOWED) {
-            if (uiState == UI_TEXT) {
+            if (uiState == UI_TEXT && use_scroll) {
                 if (text_part_completely_displayed()) {
                     // if the last part already arrived, request the first again (loop)
                     request_next_part();
