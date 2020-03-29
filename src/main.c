@@ -19,15 +19,16 @@
 
 unsigned char G_io_seproxyhal_spi_buffer[IO_SEPROXYHAL_BUFFER_SIZE_B];
 
-// if attacker sends only new lines, they are converted to ' | ' so the buffer
-// may hold sufficient space to handle them.
-static unsigned char to_display[IO_SEPROXYHAL_BUFFER_SIZE_B * 3 + MAX_CHARS_PER_LINE + 1];
-
 static unsigned char *noncestr;
 static unsigned char *datetime;
 
-static char lineBuffer[50];
+static char line2[20];
+static char line2b[30];
 
+static unsigned int  line2_size;
+static unsigned int  last_utf8_char;
+
+static unsigned char*text_to_display;
 static unsigned int  len_to_display;
 static unsigned int  current_text_pos;   // parsing cursor in the text to display
 static unsigned char is_first_text_part; // if this is the first part of a message
@@ -58,7 +59,44 @@ static void ui_approval(void);
 
 static void request_next_part();
 static void on_new_transaction_part(unsigned char *text, unsigned int len);
-static void display_text_part(void);
+static bool display_text_part(void);
+static bool update_display_buffer();
+
+/*
+** This lookup table is used to help decode the first byte of
+** a multi-byte UTF8 character.
+*/
+static const unsigned char UTF8Trans1[] = {
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+  0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+  0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+  0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+  0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+  0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+  0x00, 0x01, 0x02, 0x03, 0x00, 0x01, 0x00, 0x00,
+};
+
+#define READ_UTF8(zIn, zEnd, c)                            \
+  c = *(zIn++);                                            \
+  is_utf8 = (c >= 0xc0);                                   \
+  if( is_utf8 ){                                           \
+    c = UTF8Trans1[c-0xc0];                                \
+    while( zIn!=zEnd && (*zIn & 0xc0)==0x80 ){             \
+      c = (c<<6) + (0x3f & *(zIn++));                      \
+    }                                                      \
+    if( c<0x80                                             \
+        || (c&0xFFFFF800)==0xD800                          \
+        || (c&0xFFFFFFFE)==0xFFFE ){ c = 0xFFFD; }         \
+  }
+
+#define READ_REMAINING_UTF8(zIn, zEnd, c)                  \
+  while( zIn!=zEnd && (*zIn & 0xc0)==0x80 ){               \
+    c = (c<<6) + (0x3f & *(zIn++));                        \
+  }                                                        \
+  if( c<0x80                                               \
+      || (c&0xFFFFF800)==0xD800                            \
+      || (c&0xFFFFFFFE)==0xFFFE ){ c = 0xFFFD; }           \
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -183,7 +221,7 @@ static const bagl_element_t bagl_ui_text_review_nanos[] = {
     {
         {BAGL_LABELINE, 0x02, 20, 26, 88, 11, 0, 0, 0, 0xFFFFFF,
          0x000000, BAGL_FONT_OPEN_SANS_REGULAR_11px | BAGL_FONT_ALIGNMENT_CENTER, 0},
-        lineBuffer,
+        line2,
     },
     {
         {BAGL_ICON, 0x00, 3, 12, 7, 7, 0, 0, 0, 0xFFFFFF, 0x000000, 0,
@@ -205,6 +243,8 @@ bagl_ui_text_review_nanos_button(unsigned int button_mask,
         if (is_last_text_part) {
             ui_approval();
         } else {
+            line2_size = 0;
+            last_utf8_char = 0;
             request_next_part();
         }
         break;
@@ -215,7 +255,6 @@ bagl_ui_text_review_nanos_button(unsigned int button_mask,
     }
     return 0;
 }
-
 
 static const bagl_element_t *io_seproxyhal_touch_exit(const bagl_element_t *e) {
     // Go back to the dashboard
@@ -407,7 +446,6 @@ static unsigned char * stripchr(unsigned char *mainstr, int separator) {
 }
 
 static void on_new_transaction_part(unsigned char *text, unsigned int len) {
-    unsigned int i, dest;
 
     is_last_text_part = (G_io_apdu_buffer[2] == P1_LAST);
 
@@ -425,13 +463,6 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
     cx_hash(&hash.header, 0, text, len, NULL, 0);
 
     if (is_first_text_part) {
-        dest = 0;
-    } else {
-        memcpy(to_display, &to_display[len_to_display-MAX_CHARS_PER_LINE+1], MAX_CHARS_PER_LINE-1);
-        dest = MAX_CHARS_PER_LINE - 1;
-    }
-
-    if (is_first_text_part) {
         // parse the transaction nonce and datetime
         unsigned char *commands;
         noncestr = text;
@@ -447,6 +478,7 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
 #if 0
     // do not show trailing line breaks
     if (is_last_text_part) {
+        unsigned int i;
         for (i=len-1; i>=0; i--) {
             WIDE char c = text[i];
             if (c == '\n' || c == '\r') {
@@ -456,25 +488,18 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
     }
 #endif
 
-    for (i=0; i<len; i++) {
-        unsigned char c = text[i];
-        if (c == '\n' || c == '\r') {
-            to_display[dest++] = ' ';
-            to_display[dest++] = '|';
-            to_display[dest++] = ' ';
-        // an attacker could use many backspace chars to hide a command
-        } else if (c == 0x08) {
-            to_display[dest++] = '!';
-        } else {
-            to_display[dest++] = c;
-        }
+    if (is_first_text_part) {
+        line2_size = 0;
+        last_utf8_char = 0;
     }
 
-    len_to_display = dest;
+    text_to_display = text;
+    len_to_display = len;
     current_text_pos = 0;
+
     display_text_part();
 
-    if (is_first_text_part) {
+    if (uiState != UI_TEXT) {
         ui_text();
     } else {
         UX_REDISPLAY();
@@ -483,27 +508,98 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
 }
 
 static unsigned char text_part_completely_displayed() {
-    if (current_text_pos > 0) {
-      if (current_text_pos + MAX_CHARS_PER_LINE > len_to_display) {
-        return 1;
-      }
+    if (current_text_pos >= len_to_display &&
+        line2_size <= MAX_CHARS_PER_LINE) {
+      return 1;
     }
     return 0;
 }
 
-// Pick the text elements to display
-static void display_text_part() {
+static bool is_first_display;
+
+/* pick the text part to be displayed */
+static bool display_text_part() {
     unsigned int len;
-    if (text_part_completely_displayed()) {
-        return;
+
+    is_first_display = (line2_size == 0);
+
+    if (text_part_completely_displayed() && is_last_text_part) {
+      return false;
     }
-    len = len_to_display - current_text_pos;
+
+    if (line2_size <= MAX_CHARS_PER_LINE) {
+      if (update_display_buffer() == false) {
+        request_next_part();
+        return false;
+      }
+    }
+
+    if (!is_first_display) {
+      memmove(line2b, line2b+1, line2_size-1);
+      line2_size--;
+    }
+
+    len = line2_size;
     if (len > MAX_CHARS_PER_LINE) {
       len = MAX_CHARS_PER_LINE;
     }
-    memcpy(lineBuffer, &to_display[current_text_pos], len);
-    lineBuffer[len] = '\0';
-    current_text_pos++;
+    memcpy(line2, line2b, len);
+    line2[len] = '\0';
+
+    return true;
+}
+
+/*
+** Reads characters from the source text and writes into the
+** display buffer until it has enough content to display or
+** the source buffer was all read.
+*/
+static bool update_display_buffer() {
+    unsigned char *zIn, *zEnd;
+
+    zIn  = &text_to_display[current_text_pos];
+    zEnd = &text_to_display[len_to_display];
+
+    while (zIn < zEnd && line2_size <= MAX_CHARS_PER_LINE) {
+        unsigned int c = 0;
+        bool is_utf8 = false;
+
+        if (last_utf8_char != 0) {
+          c = last_utf8_char;
+          last_utf8_char = 0;
+          READ_REMAINING_UTF8(zIn, zEnd, c);
+        } else {
+          READ_UTF8(zIn, zEnd, c);
+        }
+
+        current_text_pos = zIn - text_to_display;
+
+        /* do we have a partial UTF8 char at the end? */
+        if (zIn == zEnd && is_utf8 && !is_last_text_part) {
+          last_utf8_char = c;
+          return false;
+        }
+
+        if (c > 0x7F) { /* non-ascii chars */
+            line2b[line2_size++] = '\\';
+            line2b[line2_size++] = 'u';
+            snprintf(&line2b[line2_size], sizeof(line2b) - line2_size, "%X", c);
+            line2_size += strlen(&line2b[line2_size]);
+        } else if (c == '\n' || c == '\r') {
+            line2b[line2_size++] = ' ';
+            line2b[line2_size++] = '|';
+            line2b[line2_size++] = ' ';
+        } else if (c == 0x08) { /* backspace should not be hidden */
+            line2b[line2_size++] = '?';
+        } else {
+            line2b[line2_size++] = c;
+        }
+    }
+
+    if (zIn == zEnd && !is_last_text_part) {
+      return false;
+    }
+    return true;
 }
 
 static void ui_idle(void) {
@@ -538,7 +634,7 @@ unsigned char io_event(unsigned char channel) {
         if (UX_DISPLAYED()) {
             // perform action after screen elements have been displayed
             if (uiState == UI_TEXT) {
-              if (is_first_text_part && current_text_pos <= 1) {
+              if (is_first_display) {
                 UX_CALLBACK_SET_INTERVAL(2000);
               } else if (text_part_completely_displayed() && is_last_text_part) {
                 UX_CALLBACK_SET_INTERVAL(2000);
@@ -556,14 +652,13 @@ unsigned char io_event(unsigned char channel) {
           if (UX_ALLOWED) {
             if (uiState == UI_TEXT) {
                 if (text_part_completely_displayed()) {
-                    if (is_last_text_part) {
-                        // do nothing
-                    } else {
-                        request_next_part();
-                    }
+                    // if the last part already arrived, request the first again (loop)
+                    request_next_part();
                 } else {
-                    display_text_part();
-                    UX_REDISPLAY();
+                    // scroll the text
+                    if (display_text_part()) {
+                        UX_REDISPLAY();
+                    }
                 }
             }
           } else {
