@@ -48,6 +48,7 @@ ux_state_t ux;
 // private and public keys
 cx_ecfp_private_key_t privateKey;
 cx_ecfp_public_key_t  publicKey;
+static bool account_selected;
 
 // functions declarations
 
@@ -64,6 +65,10 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len);
 static bool display_text_part(void);
 static bool update_display_buffer();
 static unsigned char text_part_completely_displayed();
+
+static bool derive_keys(unsigned char *bip32Path, unsigned char bip32PathLength);
+
+#define MAX_BIP32_PATH 10
 
 /*
 ** This lookup table is used to help decode the first byte of
@@ -385,6 +390,16 @@ static void sample_main(void) {
                 } break;
 
                 case INS_GET_PUBLIC_KEY: {
+                    unsigned char *path;
+                    unsigned char len;
+
+                    len = G_io_apdu_buffer[4];
+                    path = G_io_apdu_buffer + 5;
+
+                    if (derive_keys(path,len) == false) {
+                        THROW(0x6700);  // wrong length
+                    }
+
                     os_memmove(G_io_apdu_buffer, publicKey.W, 65);
                     tx = 65;
                     THROW(0x9000);
@@ -393,9 +408,12 @@ static void sample_main(void) {
                 case INS_SIGN_TXN: {
                     unsigned char *text;
                     unsigned int len, i;
+                    if (!account_selected) {
+                        THROW(0x6985);  // invalid state
+                    }
                     if ((G_io_apdu_buffer[2] != P1_MORE) &&
                         (G_io_apdu_buffer[2] != P1_LAST)) {
-                        THROW(0x6A86);
+                        THROW(0x6A86);  // incorrect P1 parameter
                     }
                     // check the message length
                     len = G_io_apdu_buffer[4];
@@ -488,7 +506,7 @@ static void on_new_transaction_part(unsigned char *text, unsigned int len) {
         datetime = stripchr(noncestr, '\n');
         commands = stripchr(datetime, '\n');
         if (!commands) {
-            THROW(0x6984);  //! can it be here? test
+            THROW(0x6984);  // invalid data
         }
         len -= (commands - text);
         text = commands;
@@ -702,25 +720,32 @@ unsigned char io_event(unsigned char channel) {
     return 1;
 }
 
-static bool derive_keys() {
-    unsigned int  path[5];
+static bool derive_keys(unsigned char *bip32Path, unsigned char bip32PathLength) {
+    unsigned int  path[MAX_BIP32_PATH];
+    unsigned char i;
     unsigned char privateKeyData[64];
 
-    // m / purpose' / coin_type' / account' / change / address_index
-    // m / 44'      / 511'       / 0'       / 0      / 0
-    path[0] = 0x8000002C;
-    path[1] = 0x800001ff;
-    path[2] = 0x80000000;
-    path[3] = 0x00000000;
-    path[4] = 0x00000000;
+    /* the length must be a multiple of 4 */
+    if ((bip32PathLength & 0x03) != 0) {
+        return false;
+    }
+    bip32PathLength /= 4;
+    if (bip32PathLength < 1 || bip32PathLength > MAX_BIP32_PATH) {
+        return false;
+    }
+    for (i = 0; i < bip32PathLength; i++) {
+        path[i] = U4BE(bip32Path, 0);
+        bip32Path += 4;
+    }
 
+    os_perso_derive_node_bip32(CX_CURVE_256K1, path, bip32PathLength, privateKeyData, NULL);
     io_seproxyhal_io_heartbeat();
-    os_perso_derive_node_bip32(CX_CURVE_256K1, path, 5, privateKeyData, NULL);
     cx_ecdsa_init_private_key(CX_CURVE_256K1, privateKeyData, 32, &privateKey);
-    io_seproxyhal_io_heartbeat();
     cx_ecfp_generate_pair(CX_CURVE_256K1, &publicKey, &privateKey, 1);
+    io_seproxyhal_io_heartbeat();
 
     memset(privateKeyData, 0, sizeof privateKeyData);
+    account_selected = true;
     return true;
 }
 
@@ -728,6 +753,7 @@ __attribute__((section(".boot"))) int main(void) {
     // exit critical section
     __asm volatile("cpsie i");
 
+    account_selected = false;
     current_text_pos = 0;
     uiState = UI_IDLE;
 
@@ -750,8 +776,6 @@ __attribute__((section(".boot"))) int main(void) {
 
             USB_power(0);
             USB_power(1);
-
-            derive_keys();
 
             ui_idle();
 
