@@ -310,7 +310,7 @@ static const bagl_element_t *io_seproxyhal_touch_approve(const bagl_element_t *e
 
 static const bagl_element_t *io_seproxyhal_touch_deny(const bagl_element_t *e) {
     G_io_apdu_buffer[0] = 0x69;
-    G_io_apdu_buffer[1] = 0x85;
+    G_io_apdu_buffer[1] = 0x82;
     // Send back the response and return without waiting for new APDU
     io_exchange(CHANNEL_APDU | IO_RETURN_AFTER_TX, 2);
     // Display back the original UX
