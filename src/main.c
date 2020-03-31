@@ -404,8 +404,8 @@ static void sample_main(void) {
                         THROW(0x6985);  // invalid state
                     }
 
-                    os_memmove(G_io_apdu_buffer, publicKey.W, 65);
-                    tx = 65;
+                    os_memmove(G_io_apdu_buffer, publicKey.W, 33);
+                    tx = 33;
                     THROW(0x9000);
                 } break;
 
@@ -747,6 +747,9 @@ static bool derive_keys(unsigned char *bip32Path, unsigned char bip32PathLength)
     cx_ecdsa_init_private_key(CX_CURVE_256K1, privateKeyData, 32, &privateKey);
     cx_ecfp_generate_pair(CX_CURVE_256K1, &publicKey, &privateKey, 1);
     io_seproxyhal_io_heartbeat();
+
+    /* convert the public key to compact format (33 bytes) */
+    publicKey.W[0] = ((publicKey.W[64] & 1) ? 0x03 : 0x02);
 
     memset(privateKeyData, 0, sizeof privateKeyData);
     account_selected = true;
