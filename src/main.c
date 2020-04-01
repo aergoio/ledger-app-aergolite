@@ -673,7 +673,7 @@ unsigned char io_event(unsigned char channel) {
         break;
 
     case SEPROXYHAL_TAG_DISPLAY_PROCESSED_EVENT:
-        if (UX_DISPLAYED()) {
+        UX_DISPLAYED_EVENT({
             // perform action after screen elements have been displayed
             if (uiState == UI_TEXT && use_scroll) {
               if (is_first_display) {
@@ -684,9 +684,7 @@ unsigned char io_event(unsigned char channel) {
                 UX_CALLBACK_SET_INTERVAL(200);
               }
             }
-        } else {
-            UX_DISPLAYED_EVENT();
-        }
+        });
         break;
 
     case SEPROXYHAL_TAG_TICKER_EVENT:
@@ -751,7 +749,7 @@ static bool derive_keys(unsigned char *bip32Path, unsigned char bip32PathLength)
     /* convert the public key to compact format (33 bytes) */
     publicKey.W[0] = ((publicKey.W[64] & 1) ? 0x03 : 0x02);
 
-    memset(privateKeyData, 0, sizeof privateKeyData);
+    explicit_bzero(privateKeyData, sizeof privateKeyData);
     account_selected = true;
     return true;
 }
