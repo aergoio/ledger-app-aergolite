@@ -8,12 +8,12 @@
 #define APP_VERSION_MAJOR   1
 #define APP_VERSION_MINOR   0
 
-#define CLA     0xE7
+#define CLA      0xE7
 #define INS_GET_APP_VERSION 0x01
 #define INS_GET_PUBLIC_KEY  0x02
 #define INS_SIGN_TXN        0x04
-#define P1_LAST 0x80
-#define P1_MORE 0x00
+#define P1_FIRST 0x01
+#define P1_LAST  0x02
 
 #define MAX_CHARS_PER_LINE 13  // some strings do not appear entirely on the screen if bigger than this
 
@@ -415,8 +415,7 @@ static void sample_main(void) {
                     if (!account_selected) {
                         THROW(0x6985);  // invalid state
                     }
-                    if ((G_io_apdu_buffer[2] != P1_MORE) &&
-                        (G_io_apdu_buffer[2] != P1_LAST)) {
+                    if (G_io_apdu_buffer[2] > P1_FIRST|P1_LAST) {
                         THROW(0x6A86);  // incorrect P1 parameter
                     }
                     // check the message length
@@ -424,7 +423,7 @@ static void sample_main(void) {
                     if (len > 250) {
                         THROW(0x6700);  // wrong length
                     }
-                    if (G_io_apdu_buffer[2] == P1_MORE && len < 50) {
+                    if ((G_io_apdu_buffer[2] & P1_LAST)==0 && len < 200) {
                         THROW(0x6700);  // wrong length
                     }
                     // check for nulls in the middle of the message
