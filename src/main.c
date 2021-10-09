@@ -155,6 +155,7 @@ bagl_ui_idle_nanos_button(unsigned int button_mask,
         break;
     }
 
+    UNUSED(button_mask_counter);
     return 0;
 }
 
@@ -204,6 +205,7 @@ bagl_ui_approval_nanos_button(unsigned int button_mask,
         io_seproxyhal_touch_deny(NULL);
         break;
     }
+    UNUSED(button_mask_counter);
     return 0;
 }
 
@@ -280,10 +282,12 @@ bagl_ui_text_review_nanos_button(unsigned int button_mask,
         io_seproxyhal_touch_deny(NULL);
         break;
     }
+    UNUSED(button_mask_counter);
     return 0;
 }
 
 static const bagl_element_t *io_seproxyhal_touch_exit(const bagl_element_t *e) {
+    UNUSED(e);
     // Go back to the dashboard
     os_sched_exit(0);
     return NULL; // do not redraw the widget
@@ -309,9 +313,11 @@ static const bagl_element_t *io_seproxyhal_touch_approve(const bagl_element_t *e
     // Display back the original UX
     ui_idle();
     return 0; // do not redraw the widget
+    UNUSED(e);
 }
 
 static const bagl_element_t *io_seproxyhal_touch_deny(const bagl_element_t *e) {
+    UNUSED(e);
     G_io_apdu_buffer[0] = 0x69;
     G_io_apdu_buffer[1] = 0x82;
     // Send back the response and return without waiting for new APDU
@@ -665,6 +671,7 @@ static void ui_approval(void) {
 }
 
 unsigned char io_event(unsigned char channel) {
+    UNUSED(channel);
     // nothing done with the event, throw an error on the transport layer if needed
 
     // can't have more than one tag in the reply, not supported yet.
