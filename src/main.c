@@ -357,13 +357,6 @@ bagl_ui_text_review_nanos_button(unsigned int button_mask,
         }
         break;
 
-    case BUTTON_EVT_RELEASED | BUTTON_LEFT | BUTTON_RIGHT:
-        use_scroll = !use_scroll;
-        if (use_scroll) {
-            UX_CALLBACK_SET_INTERVAL(200);
-        }
-        break;
-
     case BUTTON_EVT_RELEASED | BUTTON_LEFT:
         io_seproxyhal_touch_deny(NULL);
         break;
