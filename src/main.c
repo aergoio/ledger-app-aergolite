@@ -1,9 +1,12 @@
+#include <stdint.h>  // uint*_t
+#include <string.h>  // memset, explicit_bzero
+#include <stdbool.h>
+
 #include "os.h"
 #include "cx.h"
 #include "ux.h"
 
-#include <string.h>
-#include <stdbool.h>
+#include "os_io_seproxyhal.h"
 
 #define APP_VERSION_MAJOR   1
 #define APP_VERSION_MINOR   0
@@ -415,7 +418,7 @@ static void sample_main(void) {
                     if (!account_selected) {
                         THROW(0x6985);  // invalid state
                     }
-                    if (G_io_apdu_buffer[2] > P1_FIRST|P1_LAST) {
+                    if (G_io_apdu_buffer[2] > (P1_FIRST|P1_LAST)) {
                         THROW(0x6A86);  // incorrect P1 parameter
                     }
                     // check the message length
